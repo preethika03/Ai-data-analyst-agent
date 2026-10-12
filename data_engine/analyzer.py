@@ -3,17 +3,24 @@ import pandas as pd
 
 
 def analyze_dataframe(df: pd.DataFrame) -> dict:
-    """Return basic statistics and data-quality information."""
+    """Generate a basic profile and summary of a dataset."""
 
     return {
         "rows": int(df.shape[0]),
         "columns": int(df.shape[1]),
         "column_names": df.columns.tolist(),
+        "data_types": {
+            column: str(dtype)
+            for column, dtype in df.dtypes.items()
+        },
         "missing_values": {
             column: int(count)
             for column, count in df.isnull().sum().items()
         },
-        "summary_statistics": df.describe(
-            include="all"
-        ).fillna("").to_dict(),
+        "duplicate_rows": int(df.duplicated().sum()),
+        "summary_statistics": (
+            df.describe(include="all")
+            .fillna("")
+            .to_dict()
+        ),
     }
