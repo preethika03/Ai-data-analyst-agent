@@ -1,4 +1,3 @@
-
 from pathlib import Path
 
 import pandas as pd
@@ -11,6 +10,9 @@ def load_dataset(file_path: str) -> pd.DataFrame:
 
     if not path.exists():
         raise FileNotFoundError(f"File not found: {file_path}")
+
+    if not path.is_file():
+        raise ValueError(f"Path is not a file: {file_path}")
 
     if extension == ".csv":
         return pd.read_csv(path)
