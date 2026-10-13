@@ -2,6 +2,7 @@ from uuid import uuid4
 from fastapi import FastAPI, UploadFile, File, HTTPException
 import pandas as pd
 from io import BytesIO
+from data_engine.analyzer import analyze_dataframe
 
 app = FastAPI(title="AI Data Analyst Agent")
 uploaded_datasets = {}
@@ -169,6 +170,31 @@ def ask_question(request: QuestionRequest):
   
 @app.get("/analyze/{dataset_id}")
 def analyze_dataset(dataset_id: str):
+    if dataset_id not in uploaded_datasets:
+        raise HTTPException(
+            status_code=404,
+            detail="Dataset not found. Please upload the CSV again."
+        )
+
+    df = uploaded_datasets[dataset_id].copy()
+
+    if df.empty:
+        raise HTTPException(
+            status_code=400,
+            detail="The uploaded dataset is empty."
+        )
+
+    try:
+        analysis_results = analyze_dataframe(df)
+        return {
+            "dataset_id": dataset_id,
+            **analysis_results
+        }
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Analysis failed: {str(e)}"
+        )
     if dataset_id not in uploaded_datasets:
         raise HTTPException(
             status_code=404,
