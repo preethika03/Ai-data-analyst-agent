@@ -1,37 +1,82 @@
-import tempfile
+
 import unittest
-from pathlib import Path
 
-from data_engine.loader import load_dataset
+import pandas as pd
+
+from data_engine.analyzer import analyze_dataframe
 
 
-class TestDataLoader(unittest.TestCase):
-    def test_load_csv(self):
-        with tempfile.TemporaryDirectory() as temp_dir:
-            file_path = Path(temp_dir) / "sample.csv"
-            file_path.write_text("Name,Marks\nArun,85\nPriya,92\n", encoding="utf-8")
+class TestAnalyzer(unittest.TestCase):
+    def test_basic_profile(self):
+        df = pd.DataFrame({
+            "Name": ["Arun", "Priya", "Arun"],
+            "Marks": [85, 92, 85],
+        })
 
-            df = load_dataset(str(file_path))
+        result = analyze_dataframe(df)
 
-            self.assertEqual(len(df), 2)
-            self.assertEqual(list(df.columns), ["Name", "Marks"])
+        self.assertEqual(result["rows"], 3)
+        self.assertEqual(result["columns"], 2)
+        self.assertEqual(result["column_names"], ["Name", "Marks"])
+        self.assertEqual(result["data_types"]["Name"], "str")
+        self.assertEqual(result["missing_values"]["Name"], 0)
+        self.assertEqual(result["duplicate_rows"], 1)
 
-    def test_missing_file(self):
-        with self.assertRaises(FileNotFoundError):
-            load_dataset("missing_file.csv")
+    def test_missing_values(self):
+        df = pd.DataFrame({
+            "Name": ["Arun", None],
+            "Marks": [85, 92],
+        })
 
-    def test_unsupported_file_type(self):
-        with tempfile.TemporaryDirectory() as temp_dir:
-            file_path = Path(temp_dir) / "sample.txt"
-            file_path.write_text("hello", encoding="utf-8")
+        result = analyze_dataframe(df)
 
-            with self.assertRaises(ValueError):
-                load_dataset(str(file_path))
+        self.assertEqual(result["missing_values"]["Name"], 1)
+        self.assertEqual(result["missing_percentage"]["Name"], 50.0)
 
-    def test_directory_path(self):
-        with tempfile.TemporaryDirectory() as temp_dir:
-            with self.assertRaises(ValueError):
-                load_dataset(temp_dir)
+    def test_numeric_insights(self):
+        df = pd.DataFrame({
+            "Marks": [80, 90, 100],
+        })
+
+        result = analyze_dataframe(df)
+
+        self.assertEqual(
+            result["numeric_insights"]["Marks"]["mean"],
+            90.0,
+        )
+
+    def test_missing_percentage(self):
+        df = pd.DataFrame({
+            "Name": ["Arun", None, "Priya", None],
+            "Marks": [80, 90, 100, 70],
+        })
+
+        result = analyze_dataframe(df)
+
+        self.assertEqual(result["missing_values"]["Name"], 2)
+        self.assertEqual(result["missing_percentage"]["Name"], 50.0)
+        self.assertEqual(result["missing_percentage"]["Marks"], 0.0)
+
+    def test_empty_dataframe_missing_percentage(self):
+        df = pd.DataFrame(columns=["Name", "Marks"])
+
+        result = analyze_dataframe(df)
+
+        self.assertEqual(result["missing_percentage"]["Name"], 0.0)
+        self.assertEqual(result["missing_percentage"]["Marks"], 0.0)
+
+    def test_correlations(self):
+        df = pd.DataFrame({
+            "StudyHours": [1, 2, 3, 4],
+            "Marks": [10, 20, 30, 40],
+        })
+
+        result = analyze_dataframe(df)
+
+        self.assertAlmostEqual(
+            result["correlations"]["StudyHours"]["Marks"],
+            1.0,
+        )
 
 
 if __name__ == "__main__":

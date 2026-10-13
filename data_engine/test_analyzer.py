@@ -68,6 +68,31 @@ class TestAnalyzer(unittest.TestCase):
         self.assertEqual(result["missing_percentage"]["Name"], 0.0)
         self.assertEqual(result["missing_percentage"]["Marks"], 0.0)
 
+    def test_correlations(self):
+        df = pd.DataFrame({
+            "StudyHours": [1, 2, 3, 4],
+            "Marks": [10, 20, 30, 40],
+        })
+
+        result = analyze_dataframe(df)
+
+        self.assertAlmostEqual(
+            result["correlations"]["StudyHours"]["Marks"],
+            1.0,
+        )
+
+    def test_outlier_detection(self):
+        df = pd.DataFrame({
+            "Marks": [70, 72, 75, 78, 80, 82, 85, 500],
+        })
+
+        result = analyze_dataframe(df)
+
+        self.assertIn(
+            500.0,
+            result["outliers"]["Marks"],
+        )
+
 
 if __name__ == "__main__":
     unittest.main()
