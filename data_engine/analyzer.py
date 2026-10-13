@@ -18,6 +18,7 @@ def analyze_dataframe(df: pd.DataFrame) -> dict:
             for column, count in df.isnull().sum().items()
         },
         "duplicate_rows": int(df.duplicated().sum()),
+        "numeric_insights": df.describe().fillna(0).to_dict(),
         "summary_statistics": (
             df.describe(include="all")
             .fillna("")

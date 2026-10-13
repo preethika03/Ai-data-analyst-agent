@@ -32,6 +32,18 @@ class TestAnalyzer(unittest.TestCase):
 
         self.assertEqual(result["missing_values"]["Name"], 1)
 
+    def test_numeric_insights(self):
+        df = pd.DataFrame({
+            "Marks": [80, 90, 100],
+        })
+
+        result = analyze_dataframe(df)
+
+        self.assertEqual(
+            result["numeric_insights"]["Marks"]["mean"],
+            90.0,
+        )
+
 
 if __name__ == "__main__":
     unittest.main()
