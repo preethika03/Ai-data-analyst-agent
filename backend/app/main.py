@@ -1,8 +1,19 @@
+import sys
+from pathlib import Path
 from uuid import uuid4
-from fastapi import FastAPI, UploadFile, File, HTTPException
-import pandas as pd
 from io import BytesIO
+
+from fastapi import FastAPI, UploadFile, File, HTTPException
+from pydantic import BaseModel
+import pandas as pd
+from dotenv import load_dotenv
+
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(PROJECT_ROOT))
+load_dotenv(PROJECT_ROOT / ".env")
+
 from data_engine.analyzer import analyze_dataframe
+from ai_agent.llm import explain_results
 
 app = FastAPI(title="AI Data Analyst Agent")
 uploaded_datasets = {}
@@ -326,4 +337,40 @@ def data_operations(request: DataOperationRequest):
         "results": result.fillna("").to_dict(orient="records")
     }
 
+
+class InsightsRequest(BaseModel):
+    question: str = "Explain the key findings in this dataset."
+
+
+@app.post("/insights/{dataset_id}")
+def get_ai_insights(dataset_id: str, request: InsightsRequest):
+    if dataset_id not in uploaded_datasets:
+        raise HTTPException(
+            status_code=404,
+            detail="Dataset not found. Please upload the CSV again."
+        )
+
+    df = uploaded_datasets[dataset_id].copy()
+
+    try:
+        # Get actual results from Velavan's analyzer
+        analysis_results = analyze_dataframe(df)
+
+        # Ask Preethika's LLM to explain those results
+        explanation = explain_results(
+            request.question,
+            analysis_results
+        )
+
+        return {
+            "dataset_id": dataset_id,
+            "analysis_results": analysis_results,
+            "ai_explanation": explanation
+        }
+
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"AI insights failed: {str(e)}"
+        )
 
