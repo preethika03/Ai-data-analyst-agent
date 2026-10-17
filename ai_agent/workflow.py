@@ -1,6 +1,8 @@
 
 
+
 import pandas as pd
+
 from data_engine.analyzer import analyze_dataframe
 from ai_agent.llm import explain_results
 
@@ -19,17 +21,27 @@ def run_agent(question: str, df: pd.DataFrame) -> dict:
         }
 
     try:
-        # Step 1: Analyze the dataset
-        analysis_results = analyze_dataframe(df)
+        # Analyze the dataset
+        results = analyze_dataframe(df)
 
-        # Step 2: Ask Gemini to explain the results
-        explanation = explain_results(question, analysis_results)
+        # Include actual dataset records so the AI can identify
+        # specific products and values, not only summary statistics.
+        results["dataset_records"] = (
+            df.head(100).fillna("").to_dict(orient="records")
+        )
+        results["records_note"] = (
+            "These are the first 100 rows of the dataset. "
+            "Use them to identify specific records when relevant. "
+            "Do not assume they represent every row if the dataset is larger."
+        )
 
-        # Step 3: Return both results and explanation
+        # Ask Gemini to explain the analysis
+        explanation = explain_results(question.strip(), results)
+
         return {
             "success": True,
-            "question": question,
-            "analysis_results": analysis_results,
+            "question": question.strip(),
+            "analysis_results": results,
             "explanation": explanation
         }
 
