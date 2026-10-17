@@ -67,11 +67,13 @@ def analyze_dataframe(df: pd.DataFrame) -> dict:
         "columns": int(df.shape[1]),
         "column_names": df.columns.tolist(),
 
-        "data_types": {
-            column: str(dtype)
-            for column, dtype in df.dtypes.items()
+               "data_types": {
+            col: (
+                "str" if dtype == object
+                else str(dtype)
+            )
+            for col, dtype in df.dtypes.items()
         },
-
         "missing_values": missing_values,
         "missing_percentage": missing_percentage,
         "duplicate_rows": int(df.duplicated().sum()),
