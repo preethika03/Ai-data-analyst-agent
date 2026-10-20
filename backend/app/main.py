@@ -2,49 +2,90 @@ import sys
 from pathlib import Path
 from uuid import uuid4
 from io import BytesIO
+from typing import Optional, List
 
+import pandas as pd
 from fastapi import FastAPI, UploadFile, File, HTTPException
 from pydantic import BaseModel
-import pandas as pd
 from dotenv import load_dotenv
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(PROJECT_ROOT))
 load_dotenv(PROJECT_ROOT / ".env")
 
-from data_engine.analyzer import analyze_dataframe
+from .database import SessionLocal
+from .models import Dataset
+from backend.data_engine.analyzer import analyze_dataframe
 from ai_agent.llm import explain_results
 
+
 app = FastAPI(title="AI Data Analyst Agent")
+
+# Store uploaded datasets in memory while the server runs
 uploaded_datasets = {}
 
 
+# Home endpoint
 @app.get("/")
 def home():
     return {"message": "AI Data Analyst Agent is running!"}
 
 
+# Health check endpoint
 @app.get("/health")
 def health():
     return {"status": "healthy"}
 
 
+# Upload CSV and save metadata to PostgreSQL
 @app.post("/upload-csv")
 async def upload_csv(file: UploadFile = File(...)):
     if not file.filename or not file.filename.lower().endswith(".csv"):
-        raise HTTPException(status_code=400, detail="Please upload a CSV file.")
+        raise HTTPException(
+            status_code=400,
+            detail="Please upload a CSV file."
+        )
 
     try:
         content = await file.read()
 
         if not content:
-            raise HTTPException(status_code=400, detail="The file is empty.")
+            raise HTTPException(
+                status_code=400,
+                detail="The file is empty."
+            )
 
         if len(content) > 10 * 1024 * 1024:
-            raise HTTPException(status_code=413, detail="File must be under 10 MB.")
+            raise HTTPException(
+                status_code=413,
+                detail="File must be under 10 MB."
+            )
 
         df = pd.read_csv(BytesIO(content))
         dataset_id = str(uuid4())
+
+        # Save dataset metadata to PostgreSQL
+        db = SessionLocal()
+        try:
+            dataset = Dataset(
+                filename=file.filename,
+                row_count=len(df),
+                column_count=len(df.columns)
+            )
+            db.add(dataset)
+            db.commit()
+
+        except Exception:
+            db.rollback()
+            raise HTTPException(
+                status_code=500,
+                detail="Could not save dataset information to the database."
+            )
+
+        finally:
+            db.close()
+
+        # Store the dataframe for other endpoints
         uploaded_datasets[dataset_id] = df.copy()
 
         return {
@@ -62,25 +103,24 @@ async def upload_csv(file: UploadFile = File(...)):
 
     except HTTPException:
         raise
+
     except Exception:
         raise HTTPException(
             status_code=400,
             detail="Could not read the CSV file. Check its format."
         )
+
     finally:
         await file.close()
 
-from pydantic import BaseModel
 
-
-
+# Request model for asking questions
 class QuestionRequest(BaseModel):
     question: str
     dataset_id: str
 
 
-
-
+# Ask questions about the uploaded dataset
 @app.post("/ask")
 def ask_question(request: QuestionRequest):
     question = request.question.lower().strip()
@@ -124,9 +164,14 @@ def ask_question(request: QuestionRequest):
             answer = "The dataset does not contain a Price column."
 
     # Calculate total quantity
-    elif "total quantity" in question or "sum of quantity" in question:
+    elif (
+        "total quantity" in question
+        or "sum of quantity" in question
+    ):
         if "Quantity" in df.columns:
-            quantity = pd.to_numeric(df["Quantity"], errors="coerce")
+            quantity = pd.to_numeric(
+                df["Quantity"], errors="coerce"
+            )
             answer = f"The total quantity is {quantity.sum()}."
         else:
             answer = "The dataset does not contain a Quantity column."
@@ -177,8 +222,10 @@ def ask_question(request: QuestionRequest):
     return {
         "question": request.question,
         "answer": answer
-    } 
-  
+    }
+
+
+# Analyze a dataset
 @app.get("/analyze/{dataset_id}")
 def analyze_dataset(dataset_id: str):
     if dataset_id not in uploaded_datasets:
@@ -197,23 +244,29 @@ def analyze_dataset(dataset_id: str):
 
     try:
         analysis_results = analyze_dataframe(df)
+
         return {
             "dataset_id": dataset_id,
             **analysis_results
         }
+
     except Exception as e:
         raise HTTPException(
             status_code=500,
             detail=f"Analysis failed: {str(e)}"
         )
+
+
+# Get a detailed numerical summary
+@app.get("/summary/{dataset_id}")
+def get_dataset_summary(dataset_id: str):
     if dataset_id not in uploaded_datasets:
         raise HTTPException(
             status_code=404,
             detail="Dataset not found. Please upload the CSV again."
         )
 
-    df = uploaded_datasets[dataset_id]
-
+    df = uploaded_datasets[dataset_id].copy()
     numeric_summary = {}
 
     for column in df.select_dtypes(include="number").columns:
@@ -241,10 +294,8 @@ def analyze_dataset(dataset_id: str):
         "numeric_summary": numeric_summary
     }
 
-from typing import Optional, List
-from pydantic import BaseModel
 
-
+# Request model for data operations
 class DataOperationRequest(BaseModel):
     dataset_id: str
     operation: str
@@ -254,6 +305,7 @@ class DataOperationRequest(BaseModel):
     columns: Optional[List[str]] = None
 
 
+# Filter, sort, or select columns
 @app.post("/data-operations")
 def data_operations(request: DataOperationRequest):
     if request.dataset_id not in uploaded_datasets:
@@ -265,8 +317,9 @@ def data_operations(request: DataOperationRequest):
     df = uploaded_datasets[request.dataset_id].copy()
     operation = request.operation.lower().strip()
 
+    # FILTER
     if operation == "filter":
-        if request.column not in df.columns:
+        if not request.column or request.column not in df.columns:
             raise HTTPException(
                 status_code=400,
                 detail="Please provide a valid column name."
@@ -278,13 +331,15 @@ def data_operations(request: DataOperationRequest):
                 detail="Please provide a numeric filter value."
             )
 
+        # Keep rows where the numeric column is greater than the value
         numeric_values = pd.to_numeric(
             df[request.column], errors="coerce"
         )
         result = df[numeric_values > request.value]
 
+    # SORT
     elif operation == "sort":
-        if request.column not in df.columns:
+        if not request.column or request.column not in df.columns:
             raise HTTPException(
                 status_code=400,
                 detail="Please provide a valid column name."
@@ -302,6 +357,7 @@ def data_operations(request: DataOperationRequest):
             na_position="last"
         )
 
+    # SELECT COLUMNS
     elif operation == "select_columns":
         if not request.columns:
             raise HTTPException(
@@ -310,7 +366,8 @@ def data_operations(request: DataOperationRequest):
             )
 
         invalid_columns = [
-            col for col in request.columns if col not in df.columns
+            col for col in request.columns
+            if col not in df.columns
         ]
 
         if invalid_columns:
@@ -338,10 +395,12 @@ def data_operations(request: DataOperationRequest):
     }
 
 
+# Request model for AI insights
 class InsightsRequest(BaseModel):
     question: str = "Explain the key findings in this dataset."
 
 
+# Generate AI insights using the analyzer and LLM
 @app.post("/insights/{dataset_id}")
 def get_ai_insights(dataset_id: str, request: InsightsRequest):
     if dataset_id not in uploaded_datasets:
@@ -353,13 +412,14 @@ def get_ai_insights(dataset_id: str, request: InsightsRequest):
     df = uploaded_datasets[dataset_id].copy()
 
     try:
-        # Get actual results from Velavan's analyzer
+        # Get analysis results from the analyzer
         analysis_results = analyze_dataframe(df)
 
-        # Ask Preethika's LLM to explain those results
+        # Send analysis results and original rows to the LLM
         explanation = explain_results(
             request.question,
-            analysis_results
+            analysis_results,
+            df.fillna("").to_dict(orient="records")
         )
 
         return {
@@ -373,4 +433,3 @@ def get_ai_insights(dataset_id: str, request: InsightsRequest):
             status_code=500,
             detail=f"AI insights failed: {str(e)}"
         )
-
